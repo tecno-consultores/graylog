@@ -25,6 +25,7 @@ services:
       - "plugins.security.disabled=true"
     volumes:
       - ./log:/usr/share/opensearch/data
+      - /etc/localtime:/etc/localtime:ro
     ulimits:
       memlock:
         soft: -1
