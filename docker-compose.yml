@@ -1,92 +1,83 @@
 services:
-  mongo:
-    image: mongo:6.0.5-jammy
-    container_name: mongodb
-    hostname: mongodb
-    restart: always
-    pull_policy: always
-    volumes:
-      - ./mongo_data:/data/db
+  mongodb:
+    image: "mongo:7.0"
+    restart: "on-failure"
     networks:
-      - graynet
-
-  opensearch:
-    image: opensearchproject/opensearch:2.2.0
-    container_name: opensearch
-    hostname: opensearch
-    restart: always
-    pull_policy: always
-    environment:
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
-      - "bootstrap.memory_lock=true"
-      - "discovery.type=single-node"
-      - "action.auto_create_index=false"
-      - "plugins.security.ssl.http.enabled=false"
-      - "plugins.security.disabled=true"
+      - graylog
     volumes:
-      - ./log:/usr/share/opensearch/data
-      - /etc/localtime:/etc/localtime:ro
+      - "mongodb_data:/data/db"
+      - "mongodb_config:/data/configdb"  
+
+  # ⚠️ Make sure this is set on the host before starting:
+  # echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+  # sudo sysctl -p
+  datanode:
+    image: "${DATANODE_IMAGE:-graylog/graylog-datanode:7.1}"
+    hostname: "datanode"
+    environment:
+      GRAYLOG_DATANODE_NODE_ID_FILE: "/var/lib/graylog-datanode/node-id"
+      # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
+      GRAYLOG_DATANODE_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
+      GRAYLOG_DATANODE_MONGODB_URI: "mongodb://mongodb:27017/graylog"
     ulimits:
       memlock:
-        soft: -1
         hard: -1
+        soft: -1
       nofile:
         soft: 65536
         hard: 65536
     ports:
-      - 9200:9200/tcp
+      - "127.0.0.1:8999:8999/tcp"   # DataNode API
+      - "127.0.0.1:9200:9200/tcp"
+      - "127.0.0.1:9300:9300/tcp"
     networks:
-      - graynet
+      - graylog
+    volumes:
+      - "graylog-datanode:/var/lib/graylog-datanode"
+    restart: "on-failure"
 
   graylog:
-    image: graylog/graylog:5.1
-    container_name: graylog
-    hostname: graylog
-    restart: always
-    pull_policy: always
-    environment:
-      # CHANGE ME (must be at least 16 characters)!
-      GRAYLOG_PASSWORD_SECRET: "sVqZPLzcHKvyijZUqFC8OANtnDQnIK6l"
-      # echo -n password | shasum -a 256
-      GRAYLOG_ROOT_PASSWORD_SHA2: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
-      GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
-      GRAYLOG_HTTP_EXTERNAL_URI: "http://128.66.0.2:9000/"
-      GRAYLOG_ELASTICSEARCH_HOSTS: "http://opensearch:9200"
-      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
-      GRAYLOG_TIMEZONE: "America/Caracas"
-      TZ: "America/Caracas"
-      GRAYLOG_TRANSPORT_EMAIL_PROTOCOL: "smtp"
-      GRAYLOG_TRANSPORT_EMAIL_WEB_INTERFACE_URL: "http://128.66.0.2:9000/"
-      GRAYLOG_TRANSPORT_EMAIL_HOSTNAME: "outbound.mailhop.org"
-      GRAYLOG_TRANSPORT_EMAIL_ENABLED: "true"
-      GRAYLOG_TRANSPORT_EMAIL_PORT: "587"
-      GRAYLOG_TRANSPORT_EMAIL_USE_AUTH: "true"
-      GRAYLOG_TRANSPORT_EMAIL_AUTH_USERNAME: "xxxxx"
-      GRAYLOG_TRANSPORT_EMAIL_AUTH_PASSWORD: "xxxxx"
-      GRAYLOG_TRANSPORT_EMAIL_USE_TLS: "true"
-      GRAYLOG_TRANSPORT_EMAIL_USE_SSL: "false"
-      GRAYLOG_TRANSPORT_FROM_EMAIL: "graylog@example.com"
-      GRAYLOG_TRANSPORT_SUBJECT_PREFIX: "[graylog]"
-    entrypoint: /usr/bin/tini -- wait-for-it opensearch:9200 -- /docker-entrypoint.sh
-    volumes:
-      - ./graylog.conf:/usr/share/graylog/config/graylog.conf:ro
-      - ./graylog.conf:/usr/share/graylog/data/config/graylog.conf:ro
-      - ./graylog_data:/usr/share/graylog/data
-    networks:
-      - graynet
+    hostname: "server"
+    image: "${GRAYLOG_IMAGE:-graylog/graylog:7.1}"
     depends_on:
-      opensearch:
+      mongodb:
         condition: "service_started"
-      mongo:
+      datanode:
         condition: "service_started"
+    entrypoint: "/usr/bin/tini --  /docker-entrypoint.sh"
+    environment:
+      GRAYLOG_NODE_ID_FILE: "/usr/share/graylog/data/data/node-id"
+      # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
+      GRAYLOG_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
+      GRAYLOG_ROOT_PASSWORD_SHA2: "${GRAYLOG_ROOT_PASSWORD_SHA2:?Please configure GRAYLOG_ROOT_PASSWORD_SHA2 in the .env file}"
+      GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
+      GRAYLOG_HTTP_EXTERNAL_URI: "http://localhost:9000/"
+      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
     ports:
-      - 9000:9000/tcp # Graylog web interface and REST API
-      - 1514:1514/tcp # Syslog
-      - 1514:1514/udp # Syslog
-      - 12201:12201/tcp # GELF
-      - 12201:12201/udp # GELF
-      - 50001:50001/udp # prueba syslog udp
+    - "127.0.0.1:5044:5044/tcp"   # Beats
+    - "127.0.0.1:5140:5140/udp"   # Syslog
+    - "127.0.0.1:5140:5140/tcp"   # Syslog
+    - "127.0.0.1:5555:5555/tcp"   # RAW TCP
+    - "127.0.0.1:5555:5555/udp"   # RAW UDP
+    - "127.0.0.1:9000:9000/tcp"   # Server API
+    - "127.0.0.1:12201:12201/tcp" # GELF TCP
+    - "127.0.0.1:12201:12201/udp" # GELF UDP
+    #- "127.0.0.1:10000:10000/tcp" # Custom TCP port
+    #- "127.0.0.1:10000:10000/udp" # Custom UDP port
+    - "127.0.0.1:13301:13301/tcp" # Forwarder data
+    - "127.0.0.1:13302:13302/tcp" # Forwarder config
+    networks:
+      - graylog
+    volumes:
+      - "graylog_data:/usr/share/graylog/data"
+    restart: "on-failure"
 
 networks:
-  graynet:
-    driver: bridge
+  graylog:
+    driver: "bridge"
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  graylog-datanode:
+  graylog_data:
