@@ -77,8 +77,6 @@ services:
       datanode:
         condition: "service_started"
 
-
-
 networks:
   graylog:
     driver: "bridge"
