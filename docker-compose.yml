@@ -1,7 +1,10 @@
 services:
   mongodb:
-    image: "mongo:7.0"
-    restart: "on-failure"
+    image: mongo:7.0
+    hostname: mongodb
+    container_name: mongodb
+    pull_policy: always
+    restart: always
     networks:
       - graylog
     volumes:
@@ -12,12 +15,14 @@ services:
   # echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
   # sudo sysctl -p
   datanode:
-    image: "${DATANODE_IMAGE:-graylog/graylog-datanode:7.1}"
-    hostname: "datanode"
+    image: graylog/graylog-datanode:7.1
+    hostname: datanode
+    container_name: datanode
+    pull_policy: always
+    restart: always      
     environment:
       GRAYLOG_DATANODE_NODE_ID_FILE: "/var/lib/graylog-datanode/node-id"
-      # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
-      GRAYLOG_DATANODE_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
+      GRAYLOG_DATANODE_PASSWORD_SECRET: ${GRAYLOG_PASSWORD_SECRET}
       GRAYLOG_DATANODE_MONGODB_URI: "mongodb://mongodb:27017/graylog"
     ulimits:
       memlock:
@@ -34,22 +39,18 @@ services:
       - graylog
     volumes:
       - "graylog-datanode:/var/lib/graylog-datanode"
-    restart: "on-failure"
 
   graylog:
-    hostname: "server"
-    image: "${GRAYLOG_IMAGE:-graylog/graylog:7.1}"
-    depends_on:
-      mongodb:
-        condition: "service_started"
-      datanode:
-        condition: "service_started"
+    image: graylog/graylog:7.1
+    hostname: graylog
+    container_name: graylog
+    pull_policy: always
+    restart: always    
     entrypoint: "/usr/bin/tini --  /docker-entrypoint.sh"
     environment:
       GRAYLOG_NODE_ID_FILE: "/usr/share/graylog/data/data/node-id"
-      # GRAYLOG_DATANODE_PASSWORD_SECRET and GRAYLOG_PASSWORD_SECRET MUST be the same value
-      GRAYLOG_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
-      GRAYLOG_ROOT_PASSWORD_SHA2: "${GRAYLOG_ROOT_PASSWORD_SHA2:?Please configure GRAYLOG_ROOT_PASSWORD_SHA2 in the .env file}"
+      GRAYLOG_PASSWORD_SECRET: ${GRAYLOG_PASSWORD_SECRET}
+      GRAYLOG_ROOT_PASSWORD_SHA2: ${GRAYLOG_ROOT_PASSWORD_SHA2}
       GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
       GRAYLOG_HTTP_EXTERNAL_URI: "http://localhost:9000/"
       GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
@@ -70,7 +71,13 @@ services:
       - graylog
     volumes:
       - "graylog_data:/usr/share/graylog/data"
-    restart: "on-failure"
+    depends_on:
+      mongodb:
+        condition: "service_started"
+      datanode:
+        condition: "service_started"
+
+
 
 networks:
   graylog:
